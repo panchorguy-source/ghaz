@@ -3,6 +3,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  CheckCircle2,
   Download,
   Eye,
   EyeOff,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   Search,
   StickyNote,
+  UserPlus,
 } from 'lucide-react';
 
 export type LeadStatus =
@@ -39,6 +41,8 @@ interface AdminDashboardProps {
   onNavigateHome: () => void;
 }
 
+type AuthMode = 'login' | 'signup';
+
 const LEAD_STATUS_OPTIONS: LeadStatus[] = [
   'Baru',
   'Sedang Dihubungi',
@@ -48,6 +52,7 @@ const LEAD_STATUS_OPTIONS: LeadStatus[] = [
 
 const SESSION_TOKEN_STORAGE = 'gis_crm_admin_token';
 const SESSION_USER_STORAGE = 'gis_crm_admin_username';
+const SESSION_FULLNAME_STORAGE = 'gis_crm_admin_fullname';
 
 function statusBadgeStyle(status: LeadStatus): string {
   switch (status) {
@@ -98,10 +103,25 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
     if (typeof window === 'undefined') return '';
     return sessionStorage.getItem(SESSION_USER_STORAGE) || '';
   });
+  const [signedInFullName, setSignedInFullName] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return sessionStorage.getItem(SESSION_FULLNAME_STORAGE) || '';
+  });
 
+  const [authMode, setAuthMode] = useState<AuthMode>('login');
+
+  // Login fields
   const [usernameInput, setUsernameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Sign up fields
+  const [signupFullName, setSignupFullName] = useState('');
+  const [signupUsername, setSignupUsername] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupInviteCode, setSignupInviteCode] = useState('');
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [welcomeBanner, setWelcomeBanner] = useState('');
 
   const [enquiries, setEnquiries] = useState<AdminEnquiry[]>([]);
   const [usingDefaultCredentials, setUsingDefaultCredentials] = useState(false);
@@ -123,8 +143,11 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
   const clearSession = useCallback(() => {
     sessionStorage.removeItem(SESSION_TOKEN_STORAGE);
     sessionStorage.removeItem(SESSION_USER_STORAGE);
+    sessionStorage.removeItem(SESSION_FULLNAME_STORAGE);
     setSessionToken('');
     setSignedInUser('');
+    setSignedInFullName('');
+    setWelcomeBanner('');
     setEnquiries([]);
   }, []);
 
@@ -158,6 +181,14 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
 
         setEnquiries(Array.isArray(data.enquiries) ? data.enquiries : []);
         setUsingDefaultCredentials(Boolean(data.usingDefaultAdminCredentials));
+        if (data.staffUser?.fullName) {
+          setSignedInFullName(data.staffUser.fullName);
+          sessionStorage.setItem(SESSION_FULLNAME_STORAGE, data.staffUser.fullName);
+        }
+        if (data.staffUser?.username) {
+          setSignedInUser(data.staffUser.username);
+          sessionStorage.setItem(SESSION_USER_STORAGE, data.staffUser.username);
+        }
         return true;
       } catch {
         setActionError('Ralat rangkaian semasa menghubungi pelayan.');
@@ -205,14 +236,93 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
         return;
       }
 
+      const resolvedUsername = data.username || trimmedUser;
+      const resolvedFullName = data.fullName || resolvedUsername;
+
       sessionStorage.setItem(SESSION_TOKEN_STORAGE, data.token);
-      sessionStorage.setItem(SESSION_USER_STORAGE, data.username || trimmedUser);
+      sessionStorage.setItem(SESSION_USER_STORAGE, resolvedUsername);
+      sessionStorage.setItem(SESSION_FULLNAME_STORAGE, resolvedFullName);
       setSessionToken(data.token);
-      setSignedInUser(data.username || trimmedUser);
+      setSignedInUser(resolvedUsername);
+      setSignedInFullName(resolvedFullName);
       setUsingDefaultCredentials(Boolean(data.usingDefaultAdminCredentials));
+      setWelcomeBanner('');
       setPasswordInput('');
     } catch {
       setAuthError('Ralat rangkaian semasa mengesahkan log masuk.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const fullName = signupFullName.trim();
+    const username = signupUsername.trim();
+    const inviteCode = signupInviteCode.trim();
+
+    if (fullName.length < 2) {
+      setAuthError('Sila masukkan nama penuh staf (sekurang-kurangnya 2 aksara).');
+      return;
+    }
+    if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+      setAuthError(
+        'Nama pengguna mestilah sekurang-kurangnya 3 aksara (huruf, nombor, titik, _ atau -).'
+      );
+      return;
+    }
+    if (signupPassword.length < 4) {
+      setAuthError('Kata laluan mestilah sekurang-kurangnya 4 aksara.');
+      return;
+    }
+    if (!inviteCode) {
+      setAuthError('Sila masukkan kod jemputan staf GIS.');
+      return;
+    }
+
+    setLoading(true);
+    setAuthError('');
+    setActionError('');
+
+    try {
+      const response = await fetch('/api/admin/signup', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          fullName,
+          username,
+          password: signupPassword,
+          inviteCode,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok || typeof data.token !== 'string') {
+        setAuthError(
+          data?.error || 'Pendaftaran akaun gagal. Sila semak maklumat anda.'
+        );
+        return;
+      }
+
+      const resolvedUsername = data.username || username;
+      const resolvedFullName = data.fullName || fullName;
+
+      sessionStorage.setItem(SESSION_TOKEN_STORAGE, data.token);
+      sessionStorage.setItem(SESSION_USER_STORAGE, resolvedUsername);
+      sessionStorage.setItem(SESSION_FULLNAME_STORAGE, resolvedFullName);
+      setSessionToken(data.token);
+      setSignedInUser(resolvedUsername);
+      setSignedInFullName(resolvedFullName);
+      setUsingDefaultCredentials(false);
+      setWelcomeBanner(
+        data.message || `Akaun staf untuk ${resolvedFullName} berjaya didaftarkan.`
+      );
+      setSignupFullName('');
+      setSignupUsername('');
+      setSignupPassword('');
+      setSignupInviteCode('');
+    } catch {
+      setAuthError('Ralat rangkaian semasa mendaftarkan akaun staf.');
     } finally {
       setLoading(false);
     }
@@ -224,6 +334,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
     setPasswordInput('');
     setAuthError('');
     setActionError('');
+    setAuthMode('login');
   };
 
   const handleUpdateLead = async (
@@ -365,7 +476,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
     URL.revokeObjectURL(url);
   };
 
-  // Unauthenticated view: Username & Password login
+  // Unauthenticated view: Tabbed Login & Staff Sign Up
   if (!sessionToken) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -394,118 +505,307 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
           </div>
         </header>
 
-        <main className="mx-auto flex max-w-md flex-col justify-center px-4 py-16 sm:py-24">
+        <main className="mx-auto flex max-w-md flex-col justify-center px-4 py-12 sm:py-16">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-900">
-              <Lock className="h-5 w-5" aria-hidden="true" />
+              {authMode === 'login' ? (
+                <Lock className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <UserPlus className="h-5 w-5" aria-hidden="true" />
+              )}
             </div>
 
             <h1 className="mt-5 font-display text-2xl font-bold tracking-tight text-slate-950">
-              Log Masuk CRM Penasihat GIS
+              {authMode === 'login'
+                ? 'Log Masuk CRM Penasihat GIS'
+                : 'Daftar Akaun Staf Baharu'}
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Masukkan nama pengguna dan kata laluan staf untuk melihat rekod pertanyaan pelajar, menukar status susulan dan menyimpan nota pegawai.
+              {authMode === 'login'
+                ? 'Masukkan nama pengguna dan kata laluan staf untuk mengurus pertanyaan pelajar serta nota susulan.'
+                : 'Daftar akaun penasihat GIS menggunakan kod jemputan rasmi yang diberikan oleh pentadbir.'}
             </p>
 
-            <form onSubmit={handleLogin} className="mt-6 space-y-4">
-              <div>
-                <label
-                  htmlFor="admin-username-input"
-                  className="block text-sm font-semibold text-slate-900"
-                >
-                  Nama Pengguna (Username)
-                </label>
-                <input
-                  id="admin-username-input"
-                  name="username"
-                  type="text"
-                  autoComplete="username"
-                  required
-                  value={usernameInput}
-                  onChange={(e) => {
-                    setUsernameInput(e.target.value);
-                    if (authError) setAuthError('');
-                  }}
-                  placeholder="Contoh: ghaz"
-                  className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
+            {/* Segmented Switcher between Log Masuk and Daftar Akaun Staf */}
+            <div
+              role="tablist"
+              aria-label="Mod akses staf"
+              className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={authMode === 'login'}
+                onClick={() => {
+                  setAuthMode('login');
+                  setAuthError('');
+                }}
+                className={`min-h-10 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800 sm:text-sm ${
+                  authMode === 'login'
+                    ? 'bg-white text-blue-950 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-950'
+                }`}
+              >
+                Log Masuk
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={authMode === 'signup'}
+                onClick={() => {
+                  setAuthMode('signup');
+                  setAuthError('');
+                }}
+                className={`min-h-10 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800 sm:text-sm ${
+                  authMode === 'signup'
+                    ? 'bg-white text-blue-950 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-950'
+                }`}
+              >
+                Daftar Akaun Staf
+              </button>
+            </div>
 
-              <div>
-                <label
-                  htmlFor="admin-password-input"
-                  className="block text-sm font-semibold text-slate-900"
-                >
-                  Kata Laluan (Password)
-                </label>
-                <div className="relative mt-1.5">
+            {authMode === 'login' ? (
+              <form onSubmit={handleLogin} className="mt-6 space-y-4">
+                <div>
+                  <label
+                    htmlFor="admin-username-input"
+                    className="block text-sm font-semibold text-slate-900"
+                  >
+                    Nama Pengguna (Username)
+                  </label>
                   <input
-                    id="admin-password-input"
-                    name="password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="current-password"
+                    id="admin-username-input"
+                    name="username"
+                    type="text"
+                    autoComplete="username"
                     required
-                    value={passwordInput}
+                    value={usernameInput}
                     onChange={(e) => {
-                      setPasswordInput(e.target.value);
+                      setUsernameInput(e.target.value);
                       if (authError) setAuthError('');
                     }}
-                    placeholder="Masukkan kata laluan"
-                    className="block min-h-12 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-4 pr-11 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Contoh: ghaz"
+                    className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={
-                      showPassword
-                        ? 'Sembunyikan kata laluan'
-                        : 'Tunjukkan kata laluan'
-                    }
-                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="admin-password-input"
+                    className="block text-sm font-semibold text-slate-900"
                   >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" aria-hidden="true" />
-                    ) : (
-                      <Eye className="h-4 w-4" aria-hidden="true" />
-                    )}
-                  </button>
+                    Kata Laluan (Password)
+                  </label>
+                  <div className="relative mt-1.5">
+                    <input
+                      id="admin-password-input"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      required
+                      value={passwordInput}
+                      onChange={(e) => {
+                        setPasswordInput(e.target.value);
+                        if (authError) setAuthError('');
+                      }}
+                      placeholder="Masukkan kata laluan"
+                      className="block min-h-12 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-4 pr-11 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      aria-label={
+                        showPassword
+                          ? 'Sembunyikan kata laluan'
+                          : 'Tunjukkan kata laluan'
+                      }
+                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              {authError && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
-                >
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />
-                  <span>{authError}</span>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:opacity-65 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-900"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                    <span>Mengesahkan...</span>
-                  </>
-                ) : (
-                  <span>Log Masuk ke CRM</span>
+                {authError && (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+                  >
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />
+                    <span>{authError}</span>
+                  </div>
                 )}
-              </button>
-            </form>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-blue-900 px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:opacity-65 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-900"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      <span>Mengesahkan...</span>
+                    </>
+                  ) : (
+                    <span>Log Masuk ke CRM</span>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleSignUp} className="mt-6 space-y-4">
+                <div>
+                  <label
+                    htmlFor="signup-fullname-input"
+                    className="block text-sm font-semibold text-slate-900"
+                  >
+                    Nama Penuh Staf
+                  </label>
+                  <input
+                    id="signup-fullname-input"
+                    name="fullName"
+                    type="text"
+                    autoComplete="name"
+                    required
+                    value={signupFullName}
+                    onChange={(e) => {
+                      setSignupFullName(e.target.value);
+                      if (authError) setAuthError('');
+                    }}
+                    placeholder="Contoh: Puan Azrina / Fiza"
+                    className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="signup-username-input"
+                    className="block text-sm font-semibold text-slate-900"
+                  >
+                    Nama Pengguna (Username)
+                  </label>
+                  <input
+                    id="signup-username-input"
+                    name="username"
+                    type="text"
+                    autoComplete="username"
+                    required
+                    value={signupUsername}
+                    onChange={(e) => {
+                      setSignupUsername(e.target.value);
+                      if (authError) setAuthError('');
+                    }}
+                    placeholder="Contoh: azrina.gis (min. 3 aksara)"
+                    className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="signup-password-input"
+                    className="block text-sm font-semibold text-slate-900"
+                  >
+                    Kata Laluan (Password)
+                  </label>
+                  <div className="relative mt-1.5">
+                    <input
+                      id="signup-password-input"
+                      name="password"
+                      type={showSignupPassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      required
+                      value={signupPassword}
+                      onChange={(e) => {
+                        setSignupPassword(e.target.value);
+                        if (authError) setAuthError('');
+                      }}
+                      placeholder="Minimum 4 aksara"
+                      className="block min-h-12 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-4 pr-11 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword((prev) => !prev)}
+                      aria-label={
+                        showSignupPassword
+                          ? 'Sembunyikan kata laluan'
+                          : 'Tunjukkan kata laluan'
+                      }
+                      className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
+                    >
+                      {showSignupPassword ? (
+                        <EyeOff className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Eye className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="signup-invite-input"
+                    className="block text-sm font-semibold text-slate-900"
+                  >
+                    Kod Jemputan Staf (Invite Code)
+                  </label>
+                  <input
+                    id="signup-invite-input"
+                    name="inviteCode"
+                    type="text"
+                    autoComplete="off"
+                    required
+                    value={signupInviteCode}
+                    onChange={(e) => {
+                      setSignupInviteCode(e.target.value);
+                      if (authError) setAuthError('');
+                    }}
+                    placeholder="Masukkan kod jemputan staf GIS"
+                    className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  />
+                </div>
+
+                {authError && (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900"
+                  >
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />
+                    <span>{authError}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-5 py-3 text-sm font-bold text-slate-950 transition-colors hover:bg-amber-300 disabled:opacity-65 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-900"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      <span>Mendaftarkan Akaun...</span>
+                    </>
+                  ) : (
+                    <span>Daftar &amp; Log Masuk ke CRM</span>
+                  )}
+                </button>
+              </form>
+            )}
           </div>
         </main>
       </div>
     );
   }
 
+  const displayStaffName = signedInFullName || signedInUser || 'Staf GIS';
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
-      {/* Top Bar Contract */}
+      {/* Top Bar Contract with Logged-in Staff Full Name */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
@@ -522,8 +822,8 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
               <span aria-hidden="true" className="hidden text-slate-300 sm:inline">
                 /
               </span>
-              <span className="hidden truncate text-slate-500 sm:inline">
-                {signedInUser ? `Akaun: ${signedInUser}` : 'Rekod Lead Pelajar'}
+              <span className="hidden truncate font-medium text-slate-700 sm:inline">
+                {displayStaffName}
               </span>
             </div>
           </div>
@@ -574,11 +874,35 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+        {/* Mobile staff identity line */}
+        <p className="mb-4 text-sm font-medium text-slate-600 sm:hidden">
+          Staf aktif: <strong className="text-slate-950">{displayStaffName}</strong>
+        </p>
+
+        {welcomeBanner && (
+          <div
+            role="status"
+            className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950"
+          >
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-700" aria-hidden="true" />
+              <span className="font-medium">{welcomeBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setWelcomeBanner('')}
+              className="text-xs font-semibold text-emerald-800 hover:underline"
+            >
+              Tutup
+            </button>
+          </div>
+        )}
+
         {usingDefaultCredentials && (
           <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
             <p>
-              Peringatan keselamatan: Pelayan sedang menggunakan kredensial lalai. Tetapkan pemboleh ubah persekitaran <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_USERNAME</code> dan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_PASSWORD</code> sebelum laman ini dibuka kepada umum.
+              Peringatan keselamatan: Anda sedang log masuk menggunakan akaun pentadbir lalai. Tetapkan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_USERNAME</code>, <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_PASSWORD</code> dan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">STAFF_INVITE_CODE</code> sebelum laman dibuka kepada umum.
             </p>
           </div>
         )}

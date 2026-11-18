@@ -1,0 +1,10 @@
+[
+  {
+    "id": "STAFF-ADMIN-DEFAULT",
+    "fullName": "Pentadbir GIS",
+    "username": "ghaz",
+    "passwordHash": "4d3f87bb9ec7b58b4d1535e285105dd2:0ddcf015512ee5b177f5c864e361049f78e34b363c23082303accd29373edbc4e320de8a278e500e4b67d152011e5d1238c7e99bf8b3c13040040e56a852c5c5",
+    "createdAt": "2026-11-18T08:03:51.890Z",
+    "isDefault": true
+  }
+]

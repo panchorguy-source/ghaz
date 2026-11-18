@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 3000);
 const DATA_DIR = path.resolve(__dirname, 'data');
 const ENQUIRIES_FILE = path.join(DATA_DIR, 'enquiries.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 export const LEAD_STATUSES = [
   'Baru',
@@ -35,8 +36,25 @@ interface EnquiryRecord {
   updatedAt?: string;
 }
 
+interface StaffUserRecord {
+  id: string;
+  fullName: string;
+  username: string;
+  passwordHash: string;
+  createdAt: string;
+  isDefault?: boolean;
+}
+
+interface AuthenticatedRequest extends Request {
+  staffUser?: {
+    username: string;
+    fullName: string;
+  };
+}
+
 const DEFAULT_ADMIN_USERNAME = 'ghaz';
 const DEFAULT_ADMIN_PASSWORD = '1234';
+const DEFAULT_STAFF_INVITE_CODE = 'GIS-STAFF-2026';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 // In-memory sliding-window rate limiters per IP
@@ -48,6 +66,10 @@ const ADMIN_FAIL_WINDOW_MS = 15 * 60 * 1000;
 const ADMIN_MAX_FAILS = 15;
 const adminFailBuckets = new Map<string, number[]>();
 
+const SIGNUP_WINDOW_MS = 15 * 60 * 1000;
+const SIGNUP_MAX_REQUESTS = 10;
+const signupBuckets = new Map<string, number[]>();
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
   const timestamps = (rateBuckets.get(ip) || []).filter((t) => now - t < RATE_WINDOW_MS);
@@ -57,6 +79,18 @@ function isRateLimited(ip: string): boolean {
   }
   timestamps.push(now);
   rateBuckets.set(ip, timestamps);
+  return false;
+}
+
+function isSignupRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const timestamps = (signupBuckets.get(ip) || []).filter((t) => now - t < SIGNUP_WINDOW_MS);
+  if (timestamps.length >= SIGNUP_MAX_REQUESTS) {
+    signupBuckets.set(ip, timestamps);
+    return true;
+  }
+  timestamps.push(now);
+  signupBuckets.set(ip, timestamps);
   return false;
 }
 
@@ -147,7 +181,34 @@ function persistEnquiry(record: EnquiryRecord): void {
   writeEnquiries(existing);
 }
 
-function getAdminCredentials(): {
+function timingSafeEquals(a: string, b: string): boolean {
+  const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password: string, storedHash: string): boolean {
+  const parts = storedHash.split(':');
+  if (parts.length !== 2) return false;
+  const [salt, keyHex] = parts;
+  if (!salt || !keyHex) return false;
+  try {
+    const expectedBuffer = Buffer.from(keyHex, 'hex');
+    const actualBuffer = crypto.scryptSync(password, salt, 64);
+    if (expectedBuffer.length !== actualBuffer.length) return false;
+    return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+  } catch {
+    return false;
+  }
+}
+
+function getDefaultEnvAdmin(): {
   username: string;
   password: string;
   usingDefault: boolean;
@@ -161,8 +222,68 @@ function getAdminCredentials(): {
   };
 }
 
+function getStaffInviteCode(): {code: string; usingDefault: boolean} {
+  const envCode = process.env.STAFF_INVITE_CODE?.trim();
+  return {
+    code: envCode || DEFAULT_STAFF_INVITE_CODE,
+    usingDefault: !envCode,
+  };
+}
+
+function ensureUsersSeeded(): StaffUserRecord[] {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, {recursive: true});
+  }
+
+  let users: StaffUserRecord[] = [];
+  if (fs.existsSync(USERS_FILE)) {
+    try {
+      const raw = fs.readFileSync(USERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        users = parsed.filter(
+          (u): u is StaffUserRecord =>
+            Boolean(u) &&
+            typeof u.username === 'string' &&
+            typeof u.passwordHash === 'string' &&
+            typeof u.fullName === 'string'
+        );
+      }
+    } catch {
+      users = [];
+    }
+  }
+
+  if (users.length === 0) {
+    const {username, password} = getDefaultEnvAdmin();
+    const defaultAdmin: StaffUserRecord = {
+      id: 'STAFF-ADMIN-DEFAULT',
+      fullName: 'Pentadbir GIS',
+      username,
+      passwordHash: hashPassword(password),
+      createdAt: new Date().toISOString(),
+      isDefault: true,
+    };
+    users = [defaultAdmin];
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+  }
+
+  return users;
+}
+
+function readUsers(): StaffUserRecord[] {
+  return ensureUsersSeeded();
+}
+
+function writeUsers(users: StaffUserRecord[]): void {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, {recursive: true});
+  }
+  fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+}
+
 function getSigningSecret(): string {
-  const {username, password} = getAdminCredentials();
+  const {username, password} = getDefaultEnvAdmin();
   const explicitSecret = process.env.ADMIN_SESSION_SECRET?.trim();
   return crypto
     .createHash('sha256')
@@ -170,18 +291,18 @@ function getSigningSecret(): string {
     .digest('hex');
 }
 
-function timingSafeEquals(a: string, b: string): boolean {
-  const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
-  const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
-  return crypto.timingSafeEqual(hashA, hashB);
-}
-
-function issueSessionToken(username: string): string {
+function issueSessionToken(user: {username: string; fullName: string}): string {
   const expiresAt = Date.now() + SESSION_TTL_MS;
   const nonce = crypto.randomBytes(12).toString('hex');
-  const payload = Buffer.from(JSON.stringify({username, expiresAt, nonce}), 'utf8').toString(
-    'base64url'
-  );
+  const payload = Buffer.from(
+    JSON.stringify({
+      username: user.username,
+      fullName: user.fullName,
+      expiresAt,
+      nonce,
+    }),
+    'utf8'
+  ).toString('base64url');
   const signature = crypto
     .createHmac('sha256', getSigningSecret())
     .update(payload)
@@ -189,7 +310,7 @@ function issueSessionToken(username: string): string {
   return `${payload}.${signature}`;
 }
 
-function verifySessionToken(token: string): {username: string} | null {
+function verifySessionToken(token: string): {username: string; fullName: string} | null {
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [payload, signature] = parts;
@@ -207,6 +328,7 @@ function verifySessionToken(token: string): {username: string} | null {
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       username?: unknown;
+      fullName?: unknown;
       expiresAt?: unknown;
     };
     if (
@@ -216,11 +338,26 @@ function verifySessionToken(token: string): {username: string} | null {
     ) {
       return null;
     }
-    const {username: configuredUser} = getAdminCredentials();
-    if (!timingSafeEquals(decoded.username, configuredUser)) {
+
+    const users = readUsers();
+    const matchedUser = users.find(
+      (u) => u.username.toLowerCase() === decoded.username?.toString().toLowerCase()
+    );
+    const envAdmin = getDefaultEnvAdmin();
+    const isEnvAdmin =
+      decoded.username.toLowerCase() === envAdmin.username.toLowerCase();
+
+    if (!matchedUser && !isEnvAdmin) {
       return null;
     }
-    return {username: decoded.username};
+
+    return {
+      username: matchedUser?.username || envAdmin.username,
+      fullName:
+        matchedUser?.fullName ||
+        (typeof decoded.fullName === 'string' && decoded.fullName) ||
+        envAdmin.username,
+    };
   } catch {
     return null;
   }
@@ -238,7 +375,11 @@ function extractAdminToken(req: Request): string {
   return '';
 }
 
-function requireAdminAuth(req: Request, res: Response, next: NextFunction): void {
+function requireAdminAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+): void {
   const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
   if (isAdminRateLimited(clientIp)) {
     res.status(429).json({
@@ -261,10 +402,14 @@ function requireAdminAuth(req: Request, res: Response, next: NextFunction): void
   }
 
   clearAdminFailures(clientIp);
+  req.staffUser = verified;
   next();
 }
 
 async function startServer() {
+  // Ensure data/users.json exists with hashed default admin credentials on startup
+  ensureUsersSeeded();
+
   const app = express();
   app.set('trust proxy', 1);
   app.use(express.json({limit: '32kb'}));
@@ -413,7 +558,109 @@ async function startServer() {
     });
   });
 
-  // Admin login endpoint (Username & Password -> signed session token)
+  // Staff sign up endpoint protected by STAFF_INVITE_CODE and rate limiting
+  app.post('/api/admin/signup', (req: Request, res: Response) => {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    if (isAdminRateLimited(clientIp) || isSignupRateLimited(clientIp)) {
+      res.status(429).json({
+        ok: false,
+        error: 'Terlalu banyak cubaan pendaftaran dalam masa singkat. Sila tunggu sebentar.',
+      });
+      return;
+    }
+
+    const body = req.body ?? {};
+    const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode.trim() : '';
+
+    if (fullName.length < 2 || fullName.length > 100) {
+      res.status(400).json({
+        ok: false,
+        error: 'Sila masukkan nama penuh staf yang sah (sekurang-kurangnya 2 aksara).',
+      });
+      return;
+    }
+
+    if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+      res.status(400).json({
+        ok: false,
+        error:
+          'Nama pengguna mestilah sekurang-kurangnya 3 aksara dan hanya menggunakan huruf, nombor, titik, garis bawah atau sempang.',
+      });
+      return;
+    }
+
+    if (password.length < 4 || password.length > 128) {
+      res.status(400).json({
+        ok: false,
+        error: 'Kata laluan mestilah sekurang-kurangnya 4 aksara.',
+      });
+      return;
+    }
+
+    const {code: expectedInviteCode} = getStaffInviteCode();
+    if (!inviteCode || !timingSafeEquals(inviteCode, expectedInviteCode)) {
+      recordAdminFailure(clientIp);
+      res.status(403).json({
+        ok: false,
+        error: 'Kod jemputan staf tidak sah. Sila semak dengan pentadbir GIS.',
+      });
+      return;
+    }
+
+    const users = readUsers();
+    const envAdmin = getDefaultEnvAdmin();
+    const duplicate =
+      users.some((u) => u.username.toLowerCase() === username.toLowerCase()) ||
+      envAdmin.username.toLowerCase() === username.toLowerCase();
+
+    if (duplicate) {
+      res.status(409).json({
+        ok: false,
+        error: 'Nama pengguna ini telah didaftarkan. Sila pilih nama pengguna lain.',
+      });
+      return;
+    }
+
+    const newUser: StaffUserRecord = {
+      id: `STAFF-${Date.now().toString(36).toUpperCase()}`,
+      fullName: fullName.slice(0, 100),
+      username,
+      passwordHash: hashPassword(password),
+      createdAt: new Date().toISOString(),
+      isDefault: false,
+    };
+
+    try {
+      writeUsers([...users, newUser]);
+    } catch (err) {
+      console.error('Failed to persist staff user:', err);
+      res.status(500).json({
+        ok: false,
+        error: 'Gagal menyimpan akaun staf baharu pada pelayan.',
+      });
+      return;
+    }
+
+    clearAdminFailures(clientIp);
+    const token = issueSessionToken({
+      username: newUser.username,
+      fullName: newUser.fullName,
+    });
+
+    res.status(201).json({
+      ok: true,
+      token,
+      username: newUser.username,
+      fullName: newUser.fullName,
+      usingDefaultAdminCredentials: false,
+      message: `Akaun staf untuk ${newUser.fullName} berjaya didaftarkan.`,
+    });
+  });
+
+  // Admin login endpoint (checks data/users.json + env default admin -> signed session token)
   app.post('/api/admin/login', (req: Request, res: Response) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     if (isAdminRateLimited(clientIp)) {
@@ -436,11 +683,32 @@ async function startServer() {
       return;
     }
 
-    const {username, password, usingDefault} = getAdminCredentials();
-    const userMatch = timingSafeEquals(suppliedUser, username);
-    const passMatch = timingSafeEquals(suppliedPass, password);
+    const users = readUsers();
+    const matchedUser = users.find(
+      (u) => u.username.toLowerCase() === suppliedUser.toLowerCase()
+    );
+    const envAdmin = getDefaultEnvAdmin();
 
-    if (!userMatch || !passMatch) {
+    let authenticatedUser: {username: string; fullName: string; isDefault: boolean} | null = null;
+
+    if (matchedUser && verifyPassword(suppliedPass, matchedUser.passwordHash)) {
+      authenticatedUser = {
+        username: matchedUser.username,
+        fullName: matchedUser.fullName,
+        isDefault: Boolean(matchedUser.isDefault),
+      };
+    } else if (
+      timingSafeEquals(suppliedUser.toLowerCase(), envAdmin.username.toLowerCase()) &&
+      timingSafeEquals(suppliedPass, envAdmin.password)
+    ) {
+      authenticatedUser = {
+        username: envAdmin.username,
+        fullName: matchedUser?.fullName || 'Pentadbir GIS',
+        isDefault: envAdmin.usingDefault,
+      };
+    }
+
+    if (!authenticatedUser) {
       recordAdminFailure(clientIp);
       res.status(401).json({
         ok: false,
@@ -450,27 +718,33 @@ async function startServer() {
     }
 
     clearAdminFailures(clientIp);
-    const token = issueSessionToken(username);
+    const token = issueSessionToken({
+      username: authenticatedUser.username,
+      fullName: authenticatedUser.fullName,
+    });
 
     res.json({
       ok: true,
       token,
-      username,
-      usingDefaultAdminCredentials: usingDefault,
+      username: authenticatedUser.username,
+      fullName: authenticatedUser.fullName,
+      usingDefaultAdminCredentials: authenticatedUser.isDefault && envAdmin.usingDefault,
     });
   });
 
   // Protected CRM admin endpoints
-  app.get('/api/admin/enquiries', requireAdminAuth, (_req: Request, res: Response) => {
+  app.get('/api/admin/enquiries', requireAdminAuth, (req: AuthenticatedRequest, res: Response) => {
     const records = readEnquiries().sort((a, b) =>
       b.timestamp.localeCompare(a.timestamp)
     );
-    const {usingDefault} = getAdminCredentials();
+    const {usingDefault} = getDefaultEnvAdmin();
 
     res.json({
       ok: true,
       enquiries: records,
-      usingDefaultAdminCredentials: usingDefault,
+      staffUser: req.staffUser,
+      usingDefaultAdminCredentials:
+        usingDefault && req.staffUser?.username === getDefaultEnvAdmin().username,
     });
   });
 

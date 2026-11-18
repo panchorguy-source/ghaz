@@ -39,13 +39,13 @@ export interface FaqItem {
 }
 
 export const WHATSAPP_URL =
-  'https://wa.me/601266189332?text=saya%20berminat%20untuk%20mengetahui%20maklumat%20lanjut%20berkenaan%20program%20logistic.';
+  'https://wa.me/60126618932?text=saya%20berminat%20untuk%20mengetahui%20maklumat%20lanjut%20berkenaan%20program%20logistic.';
 
 export const GIS_CONTACT = {
   institutionName: 'Global Institute of Studies (GIS)',
   shortName: 'GIS Nilai',
-  whatsappDisplay: '012-66189332',
-  whatsappInternational: '601266189332',
+  whatsappDisplay: '012-6618932',
+  whatsappInternational: '60126618932',
   phoneDisplay: '06-850 0688',
   phoneHref: 'tel:+6068500688',
   email: 'info@gis.edu.my',
