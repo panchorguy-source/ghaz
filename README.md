@@ -1,11 +1,28 @@
-<div align="center">
+# Global Institute of Studies (GIS) — Landing Page
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Laman web maklumat dan pertanyaan program TVET/SKM serta Diploma untuk Global Institute of Studies (GIS), Nilai, Negeri Sembilan.
 
-  <h1>Built with AI Studio</h2>
+## Ciri Utama
+- Bahasa Melayu (Malaysia) mesra ibu bapa/penjaga dan pelajar lepasan SPM.
+- Tema cerah institusi (*light mode*) dengan susun atur responsif (mudah alih, tablet, desktop).
+- Bahagian lima persoalan utama ibu bapa tanpa dakwaan atau jaminan yang tidak disahkan.
+- Penemuan program dengan tab boleh akses papan kekunci (`TVET / SKM` dan `Diploma`).
+- Borang pertanyaan 3 medan (`Nama penuh`, `Nombor telefon`, `Alamat e-mel`) dengan pengesahan format Malaysia, *honeypot* anti-spam, had kadar pelayan (*rate limiting*) dan sokongan metadata minat program.
+- Pelayan Express (`/api/enquiries`) yang mengesahkan respons JSON secara terus (tidak bergantung kepada `no-cors`).
+- Integrasi WhatsApp terus ke `012-66189332` (`601266189332`).
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Sambungan Google Sheets (`panchorguy@gmail.com`)
+1. Cipta Google Sheet baharu (contoh: **GIS Leads 2026**) dengan tajuk lajur:
+   `Timestamp | Name | Phone | Email | Source | Programme interest`
+2. Buka **Extensions → Apps Script** dan salin kandungan fail `Code.gs`.
+3. Dalam **Project Settings → Script Properties**, tambah `SHEET_ID` dengan ID helaian Google Sheet anda.
+4. Klik **Deploy → New deployment → Web app**, tetapkan *Execute as: Me*, dan salin URL `/exec`.
+5. Tetapkan pemboleh ubah persekitaran pelayan `GOOGLE_APPS_SCRIPT_WEB_APP_URL` kepada URL `/exec` tersebut.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
-
-</div>
+## Bahan yang Memerlukan Pengesahan Rasmi GIS Sebelum Pelancaran
+1. Logo rasmi dan garis panduan jenama GIS.
+2. Senarai program terkini, status pengambilan semasa, serta status pengiktirafan JPK/SKM atau akreditasi MQA yang tepat bagi setiap program.
+3. Syarat kelayakan serta ketersediaan terkini bantuan pinjaman/pembiayaan pengajian.
+4. Rakan kerjasama industri dan bentuk sokongan kerjaya sebenar.
+5. Ketersediaan asrama/penginapan, kadar bayaran, dan foto fasiliti rasmi GIS.
+6. Teks notis privasi PDPA rasmi institusi dan pegawai pengendali susulan pertanyaan.

@@ -1,0 +1,6 @@
+{
+  "name": "GIS Nilai — Program TVET, SKM & Diploma",
+  "description": "Laman rasmi pertanyaan dan pendaftaran minat program TVET, Sijil Kemahiran Malaysia (SKM) dan Diploma di Global Institute of Studies (GIS), Nilai, Negeri Sembilan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
