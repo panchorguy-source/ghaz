@@ -20,9 +20,9 @@ Laman web maklumat dan pertanyaan program TVET/SKM serta Diploma untuk Global In
 5. Tetapkan pemboleh ubah persekitaran pelayan `GOOGLE_APPS_SCRIPT_WEB_APP_URL` kepada URL `/exec` tersebut.
 
 ## Sistem CRM Staf GIS (`/admin`)
-1. Tetapkan pemboleh ubah persekitaran `ADMIN_API_KEY` dalam `.env` atau panel Secrets pelayan untuk menetapkan kata laluan pentadbir anda sendiri (jika belum ditetapkan, nilai lalai pembangunan ialah `gis-admin-2026`).
+1. Tetapkan pemboleh ubah persekitaran `ADMIN_USERNAME` dan `ADMIN_PASSWORD` dalam `.env` atau panel Secrets pelayan (jika belum ditetapkan, kredensial lalai ialah `ghaz` / `1234`).
 2. Layari laluan `/admin` (atau klik pautan **Portal Staf (CRM)** di bahagian pengaki laman).
-3. Masukkan kunci akses pentadbir. Pelayan mengesahkan permintaan melalui header HTTP `x-admin-key` pada laluan `GET /api/admin/enquiries` dan `PATCH /api/admin/enquiries/:id`.
+3. Log masuk menggunakan **Nama Pengguna** dan **Kata Laluan**. Pelayan akan mengesahkan kredensial melalui `POST /api/admin/login` dan mengeluarkan token sesi untuk laluan `GET /api/admin/enquiries` serta `PATCH /api/admin/enquiries/:id`.
 4. Staf boleh menapis mengikut status (`Baru`, `Sedang Dihubungi`, `Berjaya Daftar`, `Tidak Berminat`), mencari mengikut nama/telefon/program, mengemas kini status serta menyimpan nota susulan.
 
 ## Bahan yang Memerlukan Pengesahan Rasmi GIS Sebelum Pelancaran

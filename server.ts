@@ -35,7 +35,9 @@ interface EnquiryRecord {
   updatedAt?: string;
 }
 
-const DEFAULT_DEV_ADMIN_KEY = 'gis-admin-2026';
+const DEFAULT_ADMIN_USERNAME = 'ghaz';
+const DEFAULT_ADMIN_PASSWORD = '1234';
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 // In-memory sliding-window rate limiters per IP
 const RATE_WINDOW_MS = 15 * 60 * 1000;
@@ -78,7 +80,6 @@ function clearAdminFailures(ip: string): void {
 
 function sanitizeCell(value: string, maxLength = 240): string {
   const trimmed = value.trim().slice(0, maxLength);
-  // Neutralize spreadsheet formula prefixes
   if (/^[=+\-@\t\r]/.test(trimmed)) {
     return `'${trimmed}`;
   }
@@ -146,24 +147,86 @@ function persistEnquiry(record: EnquiryRecord): void {
   writeEnquiries(existing);
 }
 
-function getConfiguredAdminKey(): {key: string; usingDefault: boolean} {
-  const envKey = process.env.ADMIN_API_KEY?.trim();
-  if (envKey) {
-    return {key: envKey, usingDefault: false};
-  }
-  return {key: DEFAULT_DEV_ADMIN_KEY, usingDefault: true};
+function getAdminCredentials(): {
+  username: string;
+  password: string;
+  usingDefault: boolean;
+} {
+  const envUser = process.env.ADMIN_USERNAME?.trim();
+  const envPass = process.env.ADMIN_PASSWORD?.trim();
+  return {
+    username: envUser || DEFAULT_ADMIN_USERNAME,
+    password: envPass || DEFAULT_ADMIN_PASSWORD,
+    usingDefault: !envUser && !envPass,
+  };
+}
+
+function getSigningSecret(): string {
+  const {username, password} = getAdminCredentials();
+  const explicitSecret = process.env.ADMIN_SESSION_SECRET?.trim();
+  return crypto
+    .createHash('sha256')
+    .update(explicitSecret || `gis-crm-signing:${username}:${password}`)
+    .digest('hex');
 }
 
 function timingSafeEquals(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) {
-    return false;
-  }
-  return crypto.timingSafeEqual(bufA, bufB);
+  const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(hashA, hashB);
 }
 
-function extractAdminKey(req: Request): string {
+function issueSessionToken(username: string): string {
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  const nonce = crypto.randomBytes(12).toString('hex');
+  const payload = Buffer.from(JSON.stringify({username, expiresAt, nonce}), 'utf8').toString(
+    'base64url'
+  );
+  const signature = crypto
+    .createHmac('sha256', getSigningSecret())
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function verifySessionToken(token: string): {username: string} | null {
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payload, signature] = parts;
+  if (!payload || !signature) return null;
+
+  const expectedSig = crypto
+    .createHmac('sha256', getSigningSecret())
+    .update(payload)
+    .digest('base64url');
+
+  if (!timingSafeEquals(signature, expectedSig)) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
+      username?: unknown;
+      expiresAt?: unknown;
+    };
+    if (
+      typeof decoded.username !== 'string' ||
+      typeof decoded.expiresAt !== 'number' ||
+      Date.now() > decoded.expiresAt
+    ) {
+      return null;
+    }
+    const {username: configuredUser} = getAdminCredentials();
+    if (!timingSafeEquals(decoded.username, configuredUser)) {
+      return null;
+    }
+    return {username: decoded.username};
+  } catch {
+    return null;
+  }
+}
+
+function extractAdminToken(req: Request): string {
   const headerKey = req.header('x-admin-key');
   if (typeof headerKey === 'string' && headerKey.trim()) {
     return headerKey.trim();
@@ -185,14 +248,14 @@ function requireAdminAuth(req: Request, res: Response, next: NextFunction): void
     return;
   }
 
-  const supplied = extractAdminKey(req);
-  const {key: expected} = getConfiguredAdminKey();
+  const token = extractAdminToken(req);
+  const verified = token ? verifySessionToken(token) : null;
 
-  if (!supplied || !timingSafeEquals(supplied, expected)) {
+  if (!verified) {
     recordAdminFailure(clientIp);
     res.status(401).json({
       ok: false,
-      error: 'Akses tidak dibenarkan. Sila masukkan kunci pentadbir yang sah.',
+      error: 'Sesi tidak sah atau telah tamat. Sila log masuk semula.',
     });
     return;
   }
@@ -350,17 +413,64 @@ async function startServer() {
     });
   });
 
+  // Admin login endpoint (Username & Password -> signed session token)
+  app.post('/api/admin/login', (req: Request, res: Response) => {
+    const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+    if (isAdminRateLimited(clientIp)) {
+      res.status(429).json({
+        ok: false,
+        error: 'Terlalu banyak cubaan log masuk gagal. Sila tunggu sebentar sebelum mencuba lagi.',
+      });
+      return;
+    }
+
+    const body = req.body ?? {};
+    const suppliedUser = typeof body.username === 'string' ? body.username.trim() : '';
+    const suppliedPass = typeof body.password === 'string' ? body.password : '';
+
+    if (!suppliedUser || !suppliedPass) {
+      res.status(400).json({
+        ok: false,
+        error: 'Sila masukkan nama pengguna dan kata laluan.',
+      });
+      return;
+    }
+
+    const {username, password, usingDefault} = getAdminCredentials();
+    const userMatch = timingSafeEquals(suppliedUser, username);
+    const passMatch = timingSafeEquals(suppliedPass, password);
+
+    if (!userMatch || !passMatch) {
+      recordAdminFailure(clientIp);
+      res.status(401).json({
+        ok: false,
+        error: 'Nama pengguna atau kata laluan tidak sah.',
+      });
+      return;
+    }
+
+    clearAdminFailures(clientIp);
+    const token = issueSessionToken(username);
+
+    res.json({
+      ok: true,
+      token,
+      username,
+      usingDefaultAdminCredentials: usingDefault,
+    });
+  });
+
   // Protected CRM admin endpoints
   app.get('/api/admin/enquiries', requireAdminAuth, (_req: Request, res: Response) => {
     const records = readEnquiries().sort((a, b) =>
       b.timestamp.localeCompare(a.timestamp)
     );
-    const {usingDefault} = getConfiguredAdminKey();
+    const {usingDefault} = getAdminCredentials();
 
     res.json({
       ok: true,
       enquiries: records,
-      usingDefaultAdminKey: usingDefault,
+      usingDefaultAdminCredentials: usingDefault,
     });
   });
 

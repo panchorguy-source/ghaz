@@ -46,7 +46,8 @@ const LEAD_STATUS_OPTIONS: LeadStatus[] = [
   'Tidak Berminat',
 ];
 
-const SESSION_KEY_STORAGE = 'gis_crm_admin_key';
+const SESSION_TOKEN_STORAGE = 'gis_crm_admin_token';
+const SESSION_USER_STORAGE = 'gis_crm_admin_username';
 
 function statusBadgeStyle(status: LeadStatus): string {
   switch (status) {
@@ -89,15 +90,21 @@ function toWhatsAppPhoneLink(rawPhone: string, name: string, programme: string):
 }
 
 export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
-  const [adminKey, setAdminKey] = useState<string>(() => {
+  const [sessionToken, setSessionToken] = useState<string>(() => {
     if (typeof window === 'undefined') return '';
-    return sessionStorage.getItem(SESSION_KEY_STORAGE) || '';
+    return sessionStorage.getItem(SESSION_TOKEN_STORAGE) || '';
   });
-  const [keyInput, setKeyInput] = useState('');
-  const [showKey, setShowKey] = useState(false);
+  const [signedInUser, setSignedInUser] = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    return sessionStorage.getItem(SESSION_USER_STORAGE) || '';
+  });
+
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const [enquiries, setEnquiries] = useState<AdminEnquiry[]>([]);
-  const [usingDefaultKey, setUsingDefaultKey] = useState(false);
+  const [usingDefaultCredentials, setUsingDefaultCredentials] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authError, setAuthError] = useState('');
   const [actionError, setActionError] = useState('');
@@ -113,69 +120,108 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savedNoticeId, setSavedNoticeId] = useState<string | null>(null);
 
-  const fetchEnquiries = useCallback(async (keyToUse: string) => {
-    setLoading(true);
-    setAuthError('');
-    setActionError('');
-    try {
-      const response = await fetch('/api/admin/enquiries', {
-        headers: {
-          'x-admin-key': keyToUse,
-        },
-      });
-      const data = await response.json().catch(() => null);
-
-      if (response.status === 401 || response.status === 429) {
-        sessionStorage.removeItem(SESSION_KEY_STORAGE);
-        setAdminKey('');
-        setEnquiries([]);
-        setAuthError(
-          data?.error || 'Kunci pentadbir tidak sah. Sila cuba semula.'
-        );
-        return false;
-      }
-
-      if (!response.ok || !data?.ok) {
-        setActionError(
-          data?.error || 'Gagal memuatkan senarai pertanyaan daripada pelayan.'
-        );
-        return false;
-      }
-
-      sessionStorage.setItem(SESSION_KEY_STORAGE, keyToUse);
-      setAdminKey(keyToUse);
-      setEnquiries(Array.isArray(data.enquiries) ? data.enquiries : []);
-      setUsingDefaultKey(Boolean(data.usingDefaultAdminKey));
-      return true;
-    } catch {
-      setActionError('Ralat rangkaian semasa menghubungi pelayan.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
+  const clearSession = useCallback(() => {
+    sessionStorage.removeItem(SESSION_TOKEN_STORAGE);
+    sessionStorage.removeItem(SESSION_USER_STORAGE);
+    setSessionToken('');
+    setSignedInUser('');
+    setEnquiries([]);
   }, []);
 
+  const fetchEnquiries = useCallback(
+    async (tokenToUse: string) => {
+      setLoading(true);
+      setActionError('');
+      try {
+        const response = await fetch('/api/admin/enquiries', {
+          headers: {
+            Authorization: `Bearer ${tokenToUse}`,
+            'x-admin-key': tokenToUse,
+          },
+        });
+        const data = await response.json().catch(() => null);
+
+        if (response.status === 401 || response.status === 429) {
+          clearSession();
+          setAuthError(
+            data?.error || 'Sesi log masuk tamat. Sila log masuk semula.'
+          );
+          return false;
+        }
+
+        if (!response.ok || !data?.ok) {
+          setActionError(
+            data?.error || 'Gagal memuatkan senarai pertanyaan daripada pelayan.'
+          );
+          return false;
+        }
+
+        setEnquiries(Array.isArray(data.enquiries) ? data.enquiries : []);
+        setUsingDefaultCredentials(Boolean(data.usingDefaultAdminCredentials));
+        return true;
+      } catch {
+        setActionError('Ralat rangkaian semasa menghubungi pelayan.');
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [clearSession]
+  );
+
   useEffect(() => {
-    if (adminKey) {
-      void fetchEnquiries(adminKey);
+    if (sessionToken) {
+      void fetchEnquiries(sessionToken);
     }
-  }, [adminKey, fetchEnquiries]);
+  }, [sessionToken, fetchEnquiries]);
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmed = keyInput.trim();
-    if (!trimmed) {
-      setAuthError('Sila masukkan kata laluan atau kunci pentadbir.');
+    const trimmedUser = usernameInput.trim();
+    if (!trimmedUser || !passwordInput) {
+      setAuthError('Sila masukkan nama pengguna dan kata laluan.');
       return;
     }
-    await fetchEnquiries(trimmed);
+
+    setLoading(true);
+    setAuthError('');
+    setActionError('');
+
+    try {
+      const response = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          username: trimmedUser,
+          password: passwordInput,
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok || typeof data.token !== 'string') {
+        setAuthError(
+          data?.error || 'Nama pengguna atau kata laluan tidak sah.'
+        );
+        return;
+      }
+
+      sessionStorage.setItem(SESSION_TOKEN_STORAGE, data.token);
+      sessionStorage.setItem(SESSION_USER_STORAGE, data.username || trimmedUser);
+      setSessionToken(data.token);
+      setSignedInUser(data.username || trimmedUser);
+      setUsingDefaultCredentials(Boolean(data.usingDefaultAdminCredentials));
+      setPasswordInput('');
+    } catch {
+      setAuthError('Ralat rangkaian semasa mengesahkan log masuk.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem(SESSION_KEY_STORAGE);
-    setAdminKey('');
-    setKeyInput('');
-    setEnquiries([]);
+    clearSession();
+    setUsernameInput('');
+    setPasswordInput('');
     setAuthError('');
     setActionError('');
   };
@@ -191,14 +237,15 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'x-admin-key': adminKey,
+          Authorization: `Bearer ${sessionToken}`,
+          'x-admin-key': sessionToken,
         },
         body: JSON.stringify(patch),
       });
 
       const data = await response.json().catch(() => null);
       if (response.status === 401) {
-        handleLogout();
+        clearSession();
         setAuthError('Sesi pentadbir tamat. Sila log masuk semula.');
         return;
       }
@@ -318,8 +365,8 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
     URL.revokeObjectURL(url);
   };
 
-  // Unauthenticated view
-  if (!adminKey) {
+  // Unauthenticated view: Username & Password login
+  if (!sessionToken) {
     return (
       <div className="min-h-screen bg-slate-50 text-slate-900">
         <header className="border-b border-slate-200 bg-white">
@@ -357,37 +404,66 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
               Log Masuk CRM Penasihat GIS
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              Masukkan kunci akses pentadbir untuk melihat rekod pertanyaan pelajar, menukar status susulan dan menyimpan nota pegawai.
+              Masukkan nama pengguna dan kata laluan staf untuk melihat rekod pertanyaan pelajar, menukar status susulan dan menyimpan nota pegawai.
             </p>
 
             <form onSubmit={handleLogin} className="mt-6 space-y-4">
               <div>
                 <label
-                  htmlFor="admin-key-input"
+                  htmlFor="admin-username-input"
                   className="block text-sm font-semibold text-slate-900"
                 >
-                  Kunci Akses Pentadbir
+                  Nama Pengguna (Username)
+                </label>
+                <input
+                  id="admin-username-input"
+                  name="username"
+                  type="text"
+                  autoComplete="username"
+                  required
+                  value={usernameInput}
+                  onChange={(e) => {
+                    setUsernameInput(e.target.value);
+                    if (authError) setAuthError('');
+                  }}
+                  placeholder="Contoh: ghaz"
+                  className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="admin-password-input"
+                  className="block text-sm font-semibold text-slate-900"
+                >
+                  Kata Laluan (Password)
                 </label>
                 <div className="relative mt-1.5">
                   <input
-                    id="admin-key-input"
-                    type={showKey ? 'text' : 'password'}
+                    id="admin-password-input"
+                    name="password"
+                    type={showPassword ? 'text' : 'password'}
                     autoComplete="current-password"
-                    value={keyInput}
+                    required
+                    value={passwordInput}
                     onChange={(e) => {
-                      setKeyInput(e.target.value);
+                      setPasswordInput(e.target.value);
                       if (authError) setAuthError('');
                     }}
-                    placeholder="Masukkan kata laluan atau API key"
+                    placeholder="Masukkan kata laluan"
                     className="block min-h-12 w-full rounded-lg border border-slate-300 bg-white py-2.5 pl-4 pr-11 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
                   <button
                     type="button"
-                    onClick={() => setShowKey((prev) => !prev)}
-                    aria-label={showKey ? 'Sembunyikan kunci' : 'Tunjukkan kunci'}
-                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={
+                      showPassword
+                        ? 'Sembunyikan kata laluan'
+                        : 'Tunjukkan kata laluan'
+                    }
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
                   >
-                    {showKey ? (
+                    {showPassword ? (
                       <EyeOff className="h-4 w-4" aria-hidden="true" />
                     ) : (
                       <Eye className="h-4 w-4" aria-hidden="true" />
@@ -417,7 +493,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                     <span>Mengesahkan...</span>
                   </>
                 ) : (
-                  <span>Buka Papan Pemuka CRM</span>
+                  <span>Log Masuk ke CRM</span>
                 )}
               </button>
             </form>
@@ -447,7 +523,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                 /
               </span>
               <span className="hidden truncate text-slate-500 sm:inline">
-                Rekod Lead Pelajar
+                {signedInUser ? `Akaun: ${signedInUser}` : 'Rekod Lead Pelajar'}
               </span>
             </div>
           </div>
@@ -455,7 +531,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
           <div className="flex shrink-0 items-center gap-2.5">
             <button
               type="button"
-              onClick={() => void fetchEnquiries(adminKey)}
+              onClick={() => void fetchEnquiries(sessionToken)}
               disabled={loading}
               className="inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800 sm:text-sm"
             >
@@ -498,11 +574,11 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        {usingDefaultKey && (
+        {usingDefaultCredentials && (
           <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
             <p>
-              Peringatan keselamatan: Pelayan sedang menggunakan kunci lalai pembangunan. Tetapkan pemboleh ubah persekitaran <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_API_KEY</code> sebelum laman ini dibuka kepada umum.
+              Peringatan keselamatan: Pelayan sedang menggunakan kredensial lalai. Tetapkan pemboleh ubah persekitaran <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_USERNAME</code> dan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_PASSWORD</code> sebelum laman ini dibuka kepada umum.
             </p>
           </div>
         )}
@@ -570,7 +646,6 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Segmented status filter */}
               <div
                 role="group"
                 aria-label="Tapis mengikut status"
