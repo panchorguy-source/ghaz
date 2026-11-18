@@ -1,4 +1,5 @@
-import {useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
+import {AdminDashboard} from './components/AdminDashboard';
 import {EnquirySection} from './components/EnquirySection';
 import {FaqSection} from './components/FaqSection';
 import {FloatingWhatsApp} from './components/FloatingWhatsApp';
@@ -9,9 +10,36 @@ import {ParentConcernsSection} from './components/ParentConcernsSection';
 import {ProgrammesSection} from './components/ProgrammesSection';
 import {WhyGisSection} from './components/WhyGisSection';
 
+function isAdminPath(): boolean {
+  if (typeof window === 'undefined') return false;
+  const normalized = window.location.pathname.replace(/\/+$/, '') || '/';
+  return normalized === '/admin';
+}
+
 export default function App() {
   const [selectedProgramme, setSelectedProgramme] = useState('');
+  const [onAdminRoute, setOnAdminRoute] = useState<boolean>(() => isAdminPath());
   const nameInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setOnAdminRoute(isAdminPath());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigateTo = (targetPath: '/' | '/admin') => {
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+    setOnAdminRoute(targetPath === '/admin');
+    window.scrollTo({top: 0, behavior: 'auto'});
+  };
+
+  if (onAdminRoute) {
+    return <AdminDashboard onNavigateHome={() => navigateTo('/')} />;
+  }
 
   const handleSelectProgramme = (programmeTitle: string) => {
     setSelectedProgramme(programmeTitle);
@@ -49,7 +77,7 @@ export default function App() {
         />
       </main>
 
-      <Footer />
+      <Footer onOpenAdmin={() => navigateTo('/admin')} />
       <FloatingWhatsApp />
     </div>
   );

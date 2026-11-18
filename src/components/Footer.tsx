@@ -1,7 +1,11 @@
 import {ExternalLink, Mail, MapPin, Phone} from 'lucide-react';
 import {GIS_CONTACT, NAV_LINKS, WHATSAPP_URL} from '../data/gisContent';
 
-export function Footer() {
+interface FooterProps {
+  onOpenAdmin?: () => void;
+}
+
+export function Footer({onOpenAdmin}: FooterProps) {
   return (
     <footer
       id="hubungi"
@@ -47,6 +51,20 @@ export function Footer() {
                   className="font-medium text-blue-900 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
                 >
                   Mohon Pendaftaran Online
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/admin"
+                  onClick={(e) => {
+                    if (onOpenAdmin) {
+                      e.preventDefault();
+                      onOpenAdmin();
+                    }
+                  }}
+                  className="text-slate-500 transition-colors hover:text-blue-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-800"
+                >
+                  Portal Staf (CRM)
                 </a>
               </li>
             </ul>
