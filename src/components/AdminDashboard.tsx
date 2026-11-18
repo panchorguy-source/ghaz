@@ -115,11 +115,10 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Sign up fields
+  // Sign up fields (3 fields only)
   const [signupFullName, setSignupFullName] = useState('');
   const [signupUsername, setSignupUsername] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
-  const [signupInviteCode, setSignupInviteCode] = useState('');
   const [showSignupPassword, setShowSignupPassword] = useState(false);
   const [welcomeBanner, setWelcomeBanner] = useState('');
 
@@ -259,24 +258,19 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
     event.preventDefault();
     const fullName = signupFullName.trim();
     const username = signupUsername.trim();
-    const inviteCode = signupInviteCode.trim();
 
     if (fullName.length < 2) {
-      setAuthError('Sila masukkan nama penuh staf (sekurang-kurangnya 2 aksara).');
+      setAuthError('Sila masukkan nama penuh (sekurang-kurangnya 2 aksara).');
       return;
     }
-    if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+    if (!/^[a-zA-Z0-9]{3,40}$/.test(username)) {
       setAuthError(
-        'Nama pengguna mestilah sekurang-kurangnya 3 aksara (huruf, nombor, titik, _ atau -).'
+        'Nama pengguna mestilah sekurang-kurangnya 3 aksara dan hanya menggunakan huruf serta nombor sahaja.'
       );
       return;
     }
     if (signupPassword.length < 4) {
       setAuthError('Kata laluan mestilah sekurang-kurangnya 4 aksara.');
-      return;
-    }
-    if (!inviteCode) {
-      setAuthError('Sila masukkan kod jemputan staf GIS.');
       return;
     }
 
@@ -292,7 +286,6 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
           fullName,
           username,
           password: signupPassword,
-          inviteCode,
         }),
       });
 
@@ -315,14 +308,13 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
       setSignedInFullName(resolvedFullName);
       setUsingDefaultCredentials(false);
       setWelcomeBanner(
-        data.message || `Akaun staf untuk ${resolvedFullName} berjaya didaftarkan.`
+        data.message || `Akaun untuk ${resolvedFullName} berjaya didaftarkan.`
       );
       setSignupFullName('');
       setSignupUsername('');
       setSignupPassword('');
-      setSignupInviteCode('');
     } catch {
-      setAuthError('Ralat rangkaian semasa mendaftarkan akaun staf.');
+      setAuthError('Ralat rangkaian semasa mendaftarkan akaun baharu.');
     } finally {
       setLoading(false);
     }
@@ -518,18 +510,18 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
             <h1 className="mt-5 font-display text-2xl font-bold tracking-tight text-slate-950">
               {authMode === 'login'
                 ? 'Log Masuk CRM Penasihat GIS'
-                : 'Daftar Akaun Staf Baharu'}
+                : 'Daftar Akaun Baharu (Sign Up)'}
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
               {authMode === 'login'
-                ? 'Masukkan nama pengguna dan kata laluan staf untuk mengurus pertanyaan pelajar serta nota susulan.'
-                : 'Daftar akaun penasihat GIS menggunakan kod jemputan rasmi yang diberikan oleh pentadbir.'}
+                ? 'Masukkan nama pengguna dan kata laluan untuk mengurus pertanyaan pelajar serta nota susulan.'
+                : 'Cipta akaun pengguna baharu untuk mengakses papan pemuka CRM pertanyaan pelajar GIS.'}
             </p>
 
-            {/* Segmented Switcher between Log Masuk and Daftar Akaun Staf */}
+            {/* Segmented Switcher between Log Masuk and Daftar Akaun Baharu */}
             <div
               role="tablist"
-              aria-label="Mod akses staf"
+              aria-label="Mod akses pengguna"
               className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1"
             >
               <button
@@ -562,7 +554,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                     : 'text-slate-600 hover:text-slate-950'
                 }`}
               >
-                Daftar Akaun Staf
+                Daftar Akaun Baharu
               </button>
             </div>
 
@@ -664,7 +656,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                     htmlFor="signup-fullname-input"
                     className="block text-sm font-semibold text-slate-900"
                   >
-                    Nama Penuh Staf
+                    Nama Penuh
                   </label>
                   <input
                     id="signup-fullname-input"
@@ -677,7 +669,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                       setSignupFullName(e.target.value);
                       if (authError) setAuthError('');
                     }}
-                    placeholder="Contoh: Puan Azrina / Fiza"
+                    placeholder="Contoh: Puan Azrina"
                     className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
@@ -700,7 +692,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                       setSignupUsername(e.target.value);
                       if (authError) setAuthError('');
                     }}
-                    placeholder="Contoh: azrina.gis (min. 3 aksara)"
+                    placeholder="Huruf dan nombor sahaja (min. 3 aksara)"
                     className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
                 </div>
@@ -744,29 +736,6 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
                       )}
                     </button>
                   </div>
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="signup-invite-input"
-                    className="block text-sm font-semibold text-slate-900"
-                  >
-                    Kod Jemputan Staf (Invite Code)
-                  </label>
-                  <input
-                    id="signup-invite-input"
-                    name="inviteCode"
-                    type="text"
-                    autoComplete="off"
-                    required
-                    value={signupInviteCode}
-                    onChange={(e) => {
-                      setSignupInviteCode(e.target.value);
-                      if (authError) setAuthError('');
-                    }}
-                    placeholder="Masukkan kod jemputan staf GIS"
-                    className="mt-1.5 block min-h-12 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-base text-slate-950 placeholder:text-slate-400 focus:border-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
                 </div>
 
                 {authError && (
@@ -902,7 +871,7 @@ export function AdminDashboard({onNavigateHome}: AdminDashboardProps) {
           <div className="mb-6 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
             <p>
-              Peringatan keselamatan: Anda sedang log masuk menggunakan akaun pentadbir lalai. Tetapkan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_USERNAME</code>, <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_PASSWORD</code> dan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">STAFF_INVITE_CODE</code> sebelum laman dibuka kepada umum.
+              Peringatan keselamatan: Anda sedang log masuk menggunakan akaun pentadbir lalai. Tetapkan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_USERNAME</code> dan <code className="rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs">ADMIN_PASSWORD</code> sebelum laman dibuka kepada umum.
             </p>
           </div>
         )}

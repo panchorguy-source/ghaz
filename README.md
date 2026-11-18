@@ -20,10 +20,9 @@ Laman web maklumat dan pertanyaan program TVET/SKM serta Diploma untuk Global In
 5. Tetapkan pemboleh ubah persekitaran pelayan `GOOGLE_APPS_SCRIPT_WEB_APP_URL` kepada URL `/exec` tersebut.
 
 ## Sistem CRM Staf GIS (`/admin`)
-1. Akaun staf disimpan dalam `data/users.json` (dicipta automatik dengan akaun pentadbir lalai `ghaz` / `1234` atau nilai `ADMIN_USERNAME` / `ADMIN_PASSWORD` jika ditetapkan, dengan kata laluan di-hash menggunakan `crypto.scryptSync`).
-2. Tetapkan `STAFF_INVITE_CODE` dalam `.env` atau panel Secrets pelayan (nilai lalai: `GIS-STAFF-2026`) untuk mengawal pendaftaran akaun staf baharu melalui borang **Daftar Akaun Staf** di `/admin`.
-3. Layari laluan `/admin` (atau klik pautan **Portal Staf (CRM)** di bahagian pengaki laman) untuk log masuk atau mendaftar akaun penasihat baharu.
-4. Staf boleh menapis mengikut status (`Baru`, `Sedang Dihubungi`, `Berjaya Daftar`, `Tidak Berminat`), mencari mengikut nama/telefon/program, mengemas kini status serta menyimpan nota susulan.
+1. Akaun pengguna CRM disimpan dalam `data/users.json` (dicipta automatik dengan akaun pentadbir lalai `ghaz` / `1234` atau nilai `ADMIN_USERNAME` / `ADMIN_PASSWORD` jika ditetapkan, dengan kata laluan di-hash menggunakan `crypto.scryptSync`).
+2. Layari laluan `/admin` (atau klik pautan **Portal Staf (CRM)** di bahagian pengaki laman) untuk log masuk atau mendaftar akaun baharu terus melalui tab **Daftar Akaun Baharu**.
+3. Staf boleh menapis mengikut status (`Baru`, `Sedang Dihubungi`, `Berjaya Daftar`, `Tidak Berminat`), mencari mengikut nama/telefon/program, mengemas kini status serta menyimpan nota susulan.
 
 ## Bahan yang Memerlukan Pengesahan Rasmi GIS Sebelum Pelancaran
 1. Logo rasmi dan garis panduan jenama GIS.

@@ -54,7 +54,6 @@ interface AuthenticatedRequest extends Request {
 
 const DEFAULT_ADMIN_USERNAME = 'ghaz';
 const DEFAULT_ADMIN_PASSWORD = '1234';
-const DEFAULT_STAFF_INVITE_CODE = 'GIS-STAFF-2026';
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 // In-memory sliding-window rate limiters per IP
@@ -219,14 +218,6 @@ function getDefaultEnvAdmin(): {
     username: envUser || DEFAULT_ADMIN_USERNAME,
     password: envPass || DEFAULT_ADMIN_PASSWORD,
     usingDefault: !envUser && !envPass,
-  };
-}
-
-function getStaffInviteCode(): {code: string; usingDefault: boolean} {
-  const envCode = process.env.STAFF_INVITE_CODE?.trim();
-  return {
-    code: envCode || DEFAULT_STAFF_INVITE_CODE,
-    usingDefault: !envCode,
   };
 }
 
@@ -558,7 +549,7 @@ async function startServer() {
     });
   });
 
-  // Staff sign up endpoint protected by STAFF_INVITE_CODE and rate limiting
+  // Direct user sign up endpoint (rate-limited; no invite code required)
   app.post('/api/admin/signup', (req: Request, res: Response) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     if (isAdminRateLimited(clientIp) || isSignupRateLimited(clientIp)) {
@@ -573,21 +564,20 @@ async function startServer() {
     const fullName = typeof body.fullName === 'string' ? body.fullName.trim() : '';
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';
-    const inviteCode = typeof body.inviteCode === 'string' ? body.inviteCode.trim() : '';
 
     if (fullName.length < 2 || fullName.length > 100) {
       res.status(400).json({
         ok: false,
-        error: 'Sila masukkan nama penuh staf yang sah (sekurang-kurangnya 2 aksara).',
+        error: 'Sila masukkan nama penuh yang sah (sekurang-kurangnya 2 aksara).',
       });
       return;
     }
 
-    if (!/^[a-zA-Z0-9._-]{3,40}$/.test(username)) {
+    if (!/^[a-zA-Z0-9]{3,40}$/.test(username)) {
       res.status(400).json({
         ok: false,
         error:
-          'Nama pengguna mestilah sekurang-kurangnya 3 aksara dan hanya menggunakan huruf, nombor, titik, garis bawah atau sempang.',
+          'Nama pengguna mestilah sekurang-kurangnya 3 aksara dan hanya menggunakan huruf serta nombor sahaja.',
       });
       return;
     }
@@ -596,16 +586,6 @@ async function startServer() {
       res.status(400).json({
         ok: false,
         error: 'Kata laluan mestilah sekurang-kurangnya 4 aksara.',
-      });
-      return;
-    }
-
-    const {code: expectedInviteCode} = getStaffInviteCode();
-    if (!inviteCode || !timingSafeEquals(inviteCode, expectedInviteCode)) {
-      recordAdminFailure(clientIp);
-      res.status(403).json({
-        ok: false,
-        error: 'Kod jemputan staf tidak sah. Sila semak dengan pentadbir GIS.',
       });
       return;
     }
